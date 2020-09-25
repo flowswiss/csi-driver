@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -62,7 +63,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	sizeInGib := int(size / gib)
+	sizeInGib := int(math.Ceil(float64(size) / float64(gib)))
 
 	klog.Info("Creating volume ", Fields{
 		"name":         request.Name,
