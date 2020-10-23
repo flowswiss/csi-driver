@@ -1,9 +1,11 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
+	"k8s.io/kubernetes/pkg/util/resizefs"
 	"k8s.io/utils/exec"
 	"k8s.io/utils/mount"
 )
@@ -16,7 +18,8 @@ const (
 )
 
 type Mounter struct {
-	base *mount.SafeFormatAndMount
+	base   *mount.SafeFormatAndMount
+	resize *resizefs.ResizeFs
 }
 
 func NewMounter() *Mounter {
@@ -79,4 +82,42 @@ func (m *Mounter) Mount(source, target, fsType string, opts MountOptions) error 
 
 func (m *Mounter) Unmount(target string) error {
 	return m.base.Unmount(target)
+}
+
+func (m *Mounter) Resize(path string) error {
+	device, err := m.FindDevice(path)
+	if err != nil {
+		return err
+	}
+
+	_, err = m.resize.Resize(device, path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Mounter) FindDevice(path string) (string, error) {
+	mountPoint, err := m.FindMountPoint(path)
+	if err != nil {
+		return "", err
+	}
+
+	return mountPoint.Device, nil
+}
+
+func (m *Mounter) FindMountPoint(path string) (mount.MountPoint, error) {
+	mountPoints, err := m.base.List()
+	if err != nil {
+		return mount.MountPoint{}, err
+	}
+
+	for _, mountPoint := range mountPoints {
+		if mountPoint.Path == path {
+			return mountPoint, nil
+		}
+	}
+
+	return mount.MountPoint{}, fmt.Errorf("%s is not mounted", path)
 }

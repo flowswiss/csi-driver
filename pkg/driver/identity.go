@@ -25,6 +25,13 @@ func (d *Driver) GetPluginCapabilities(ctx context.Context, request *csi.GetPlug
 					},
 				},
 			},
+			{
+				Type: &csi.PluginCapability_VolumeExpansion_{
+					VolumeExpansion: &csi.PluginCapability_VolumeExpansion{
+						Type: csi.PluginCapability_VolumeExpansion_OFFLINE,
+					},
+				},
+			},
 		},
 	}, nil
 }

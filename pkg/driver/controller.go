@@ -375,7 +375,61 @@ func (d *Driver) ControllerGetVolume(ctx context.Context, request *csi.Controlle
 }
 
 func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_EXPAND_VOLUME)
+	if len(request.VolumeId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
+	}
+
+	volumeId := flow.ParseIdentifier(request.VolumeId)
+	if !volumeId.Valid() {
+		return nil, status.Error(codes.InvalidArgument, "provided volume id is invalid")
+	}
+
+	size, err := extractVolumeSize(request.CapacityRange)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	sizeInGib := int(math.Ceil(float64(size) / float64(gib)))
+
+	volume, _, err := d.flow.Volume.Get(ctx, volumeId)
+	if err != nil {
+		if resp, ok := err.(*flow.ErrorResponse); ok && resp.Response.StatusCode == http.StatusNotFound {
+			return nil, status.Error(codes.NotFound, "volume does not exist")
+		}
+
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	if volume.AttachedTo != nil {
+		return nil, status.Error(codes.FailedPrecondition, "volume is still attached to server")
+	}
+
+	klog.Info("Expanding volume ", Fields{
+		"id":   volume.Id,
+		"size": sizeInGib,
+	})
+
+	if sizeInGib <= volume.Size {
+		klog.Warning("Skipping volume resize because volume size exceeds requested size")
+
+		return &csi.ControllerExpandVolumeResponse{
+			CapacityBytes:         int64(volume.Size) * gib,
+			NodeExpansionRequired: request.VolumeCapability.GetBlock() == nil,
+		}, nil
+	}
+
+	data := &flow.VolumeExpand{
+		Size: sizeInGib,
+	}
+
+	volume, _, err = d.flow.Volume.Expand(ctx, volume.Id, data)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &csi.ControllerExpandVolumeResponse{
+		CapacityBytes:         int64(volume.Size) * gib,
+		NodeExpansionRequired: request.VolumeCapability.GetBlock() == nil,
+	}, nil
 }
 
 func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
@@ -394,6 +448,7 @@ func (d *Driver) ControllerGetCapabilities(ctx context.Context, request *csi.Con
 	capabilityTypes := []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
+		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 	}
 
 	var capabilities []*csi.ControllerServiceCapability

@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/flowswiss/goclient/flow"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog"
 
 	"github.com/flowswiss/csi-driver/pkg/fs"
-	"github.com/flowswiss/goclient/flow"
 )
 
 func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -216,12 +216,29 @@ func (d *Driver) NodeGetVolumeStats(ctx context.Context, request *csi.NodeGetVol
 }
 
 func (d *Driver) NodeExpandVolume(ctx context.Context, request *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	return nil, unsupportedNodeCapability(csi.NodeServiceCapability_RPC_EXPAND_VOLUME)
+	if len(request.VolumeId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
+	}
+
+	klog.Info("Resizing volume", request.VolumeId)
+
+	if request.VolumeCapability.GetBlock() != nil {
+		klog.Info("Skipping file system expansion for block volume")
+		return &csi.NodeExpandVolumeResponse{}, nil
+	}
+
+	err := d.mounter.Resize(request.VolumePath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &csi.NodeExpandVolumeResponse{}, nil
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, request *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	capabilityTypes := []csi.NodeServiceCapability_RPC_Type{
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
+		csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
 	}
 
 	var capabilities []*csi.NodeServiceCapability
