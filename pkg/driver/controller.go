@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog"
@@ -433,11 +434,93 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 }
 
 func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT)
+	if len(request.Name) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "name must be provided")
+	}
+
+	if len(request.SourceVolumeId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
+	}
+
+	volumeId := flow.ParseIdentifier(request.SourceVolumeId)
+	if !volumeId.Valid() {
+		return nil, status.Error(codes.InvalidArgument, "provided volume id is invalid")
+	}
+
+	snapshots, _, err := d.flow.Snapshot.List(ctx, flow.PaginationOptions{NoFilter: 1})
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	for _, snapshot := range snapshots {
+		if snapshot.Name == request.Name {
+			klog.Info("Found snapshot with matching requirements ", logSnapshot(snapshot))
+
+			timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
+			if err != nil {
+				return nil, status.Error(codes.Internal, err.Error())
+			}
+
+			return &csi.CreateSnapshotResponse{
+				Snapshot: &csi.Snapshot{
+					SizeBytes:      int64(snapshot.Size) * gib,
+					SnapshotId:     snapshot.Id.String(),
+					SourceVolumeId: snapshot.Volume.Id.String(),
+					CreationTime:   timestamp,
+					ReadyToUse:     true,
+				},
+			}, nil
+		}
+	}
+
+	data := &flow.SnapshotCreate{
+		Name:     request.Name,
+		VolumeId: volumeId,
+	}
+
+	snapshot, _, err := d.flow.Snapshot.Create(ctx, data)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &csi.CreateSnapshotResponse{
+		Snapshot: &csi.Snapshot{
+			SizeBytes:      int64(snapshot.Size) * gib,
+			SnapshotId:     snapshot.Id.String(),
+			SourceVolumeId: snapshot.Volume.Id.String(),
+			CreationTime:   timestamp,
+			ReadyToUse:     true,
+		},
+	}, nil
 }
 
 func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT)
+	if len(request.SnapshotId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "snapshot id must be provided")
+	}
+
+	snapshotId := flow.ParseIdentifier(request.SnapshotId)
+	if !snapshotId.Valid() {
+		return nil, status.Error(codes.InvalidArgument, "provided snapshot id is invalid")
+	}
+
+	_, err := d.flow.Snapshot.Delete(ctx, snapshotId)
+	if err != nil {
+		if resp, ok := err.(*flow.ErrorResponse); ok && resp.Response.StatusCode == http.StatusNotFound {
+			// assume snapshot is already deleted
+			klog.Warning("Assuming snapshot is already deleted because it was not found in the api")
+			return &csi.DeleteSnapshotResponse{}, nil
+		}
+
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &csi.DeleteSnapshotResponse{}, nil
 }
 
 func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
@@ -448,6 +531,7 @@ func (d *Driver) ControllerGetCapabilities(ctx context.Context, request *csi.Con
 	capabilityTypes := []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 	}
 

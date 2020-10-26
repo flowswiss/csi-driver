@@ -41,6 +41,14 @@ func logServer(server *flow.Server) Fields {
 	}
 }
 
+func logSnapshot(snapshot *flow.Snapshot) Fields {
+	return Fields{
+		"id":         snapshot.Id,
+		"name":       snapshot.Name,
+		"created_at": snapshot.CreatedAt,
+	}
+}
+
 type httpLogTransport struct {
 	base http.RoundTripper
 }
@@ -61,7 +69,7 @@ func (t *httpLogTransport) RoundTrip(req *http.Request) (res *http.Response, err
 }
 
 func grpcLoggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res interface{}, err error) {
-	klog.V(3).Info("Received request to ", info.FullMethod, " with data ", req)
+	klog.V(3).Infof("Received request to %s with data %#v", info.FullMethod, req)
 
 	res, err = handler(ctx, req)
 	if err != nil {
