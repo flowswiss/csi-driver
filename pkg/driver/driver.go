@@ -12,10 +12,10 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/klog"
 
-	"github.com/flowswiss/csi-driver/pkg/fs"
 	"github.com/flowswiss/goclient/flow"
 	"github.com/flowswiss/goclient/flow/auth"
-	"github.com/flowswiss/goclient/flow/sse"
+
+	"github.com/flowswiss/csi-driver/pkg/fs"
 )
 
 const (
@@ -25,7 +25,6 @@ const (
 
 type Driver struct {
 	flow          *flow.Client
-	sse           *sse.Client
 	healthChecker *HealthChecker
 
 	currentNodeId     flow.Id
@@ -51,8 +50,6 @@ func NewDriver(token, baseUrl, hostname string) (*Driver, error) {
 		}
 	}
 
-	sseClient := sse.NewClient(flowClient)
-
 	healthChecks := []HealthCheck{
 		&apiAccessHealthCheck{client: flowClient},
 	}
@@ -64,7 +61,6 @@ func NewDriver(token, baseUrl, hostname string) (*Driver, error) {
 
 	driver := &Driver{
 		flow: flowClient,
-		sse:  sseClient,
 		healthChecker: &HealthChecker{
 			checks: healthChecks,
 		},

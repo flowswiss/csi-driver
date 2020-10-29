@@ -8,6 +8,7 @@ require (
 	github.com/golang/protobuf v1.4.2
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
 	google.golang.org/grpc v1.31.1
+	k8s.io/apimachinery v0.19.2
 	k8s.io/klog v1.0.0
 	k8s.io/kubernetes v1.19.2
 	k8s.io/utils v0.0.0-20200821003339-5e75c0163111

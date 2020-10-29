@@ -18,6 +18,8 @@ var (
 
 func main() {
 	klog.InitFlags(flag.CommandLine)
+	defer klog.Flush()
+
 	flag.Parse()
 
 	if token == nil || *token == "" {

@@ -12,10 +12,10 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 
 	"github.com/flowswiss/goclient/flow"
-	"github.com/flowswiss/goclient/flow/sse"
 )
 
 const (
@@ -85,10 +85,18 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 			klog.Info("Found volume with matching requirements ", logVolume(volume))
 
+			if volume.Status.Id == flow.VolumeStatusWorking {
+				err = waitForVolume(d.flow, ctx, volume.Id)
+				if err != nil {
+					return nil, status.Error(codes.Internal, err.Error())
+				}
+			}
+
 			return &csi.CreateVolumeResponse{
 				Volume: &csi.Volume{
 					VolumeId:      volume.Id.String(),
 					CapacityBytes: int64(volume.Size) * gib,
+					ContentSource: request.VolumeContentSource,
 					AccessibleTopology: []*csi.Topology{
 						{
 							Segments: map[string]string{
@@ -107,6 +115,35 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		LocationId: d.clusterLocationId,
 	}
 
+	if request.VolumeContentSource != nil && request.VolumeContentSource.GetSnapshot() != nil {
+		snapshotSource := request.VolumeContentSource.GetSnapshot()
+		klog.Info("Cloning volume from snapshot ", snapshotSource.SnapshotId)
+
+		snapshotId := flow.ParseIdentifier(snapshotSource.SnapshotId)
+		if !snapshotId.Valid() {
+			return nil, status.Error(codes.InvalidArgument, "provided snapshot id is invalid")
+		}
+
+		snapshots, _, err := d.flow.Snapshot.List(ctx, flow.PaginationOptions{NoFilter: 1})
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+
+		exists := false
+		for _, snapshot := range snapshots {
+			if snapshot.Id == snapshotId {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			return nil, status.Error(codes.NotFound, "selected snapshot does not exist")
+		}
+
+		data.SnapshotId = snapshotId
+	}
+
 	volume, _, err := d.flow.Volume.Create(ctx, data)
 	if err != nil {
 		return nil, err
@@ -115,13 +152,13 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	klog.Info("Created volume ", logVolume(volume))
 
 	if volume.Status.Id == flow.VolumeStatusWorking {
-		err = waitForVolume(d.sse, ctx, volume)
+		err = waitForVolume(d.flow, ctx, volume.Id)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	}
 
-	return &csi.CreateVolumeResponse{
+	res := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volume.Id.String(),
 			CapacityBytes: int64(volume.Size) * gib,
@@ -133,7 +170,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 				},
 			},
 		},
-	}, nil
+	}
+
+	if data.SnapshotId != 0 {
+		res.Volume.ContentSource = &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: data.SnapshotId.String(),
+				},
+			},
+		}
+	}
+
+	return res, nil
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
@@ -427,6 +476,8 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
+	klog.Info("Volume has been expanded")
+
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         int64(volume.Size) * gib,
 		NodeExpansionRequired: request.VolumeCapability.GetBlock() == nil,
@@ -446,6 +497,11 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 	if !volumeId.Valid() {
 		return nil, status.Error(codes.InvalidArgument, "provided volume id is invalid")
 	}
+
+	klog.Info("Creating snapshot ", Fields{
+		"name":          request.Name,
+		"source_volume": request.SourceVolumeId,
+	})
 
 	snapshots, _, err := d.flow.Snapshot.List(ctx, flow.PaginationOptions{NoFilter: 1})
 	if err != nil {
@@ -483,6 +539,8 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
+	klog.Info("Snapshot has been created")
+
 	timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -509,6 +567,8 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 		return nil, status.Error(codes.InvalidArgument, "provided snapshot id is invalid")
 	}
 
+	klog.Info("Deleting snapshot", snapshotId)
+
 	_, err := d.flow.Snapshot.Delete(ctx, snapshotId)
 	if err != nil {
 		if resp, ok := err.(*flow.ErrorResponse); ok && resp.Response.StatusCode == http.StatusNotFound {
@@ -519,6 +579,8 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	klog.Info("Snapshot has been deleted")
 
 	return &csi.DeleteSnapshotResponse{}, nil
 }
@@ -627,31 +689,18 @@ func determineSupportedSize(required int64, limit int64) int64 {
 	return size
 }
 
-func waitForVolume(client *sse.Client, ctx context.Context, volume *flow.Volume) error {
+func waitForVolume(client *flow.Client, ctx context.Context, volumeId flow.Id) error {
 	klog.Info("Waiting for volume to become available")
 
-	channel, err := client.Subscribe(ctx, sse.SpecificVolumeTopic(volume.Id))
-	if err != nil {
-		return err
-	}
-
-	timeoutContext, _ := context.WithTimeout(ctx, 2*time.Minute)
-
-	for volume.Status.Id == flow.VolumeStatusWorking {
-		event, err := channel.WaitForEvent(timeoutContext)
+	return wait.Poll(time.Second, time.Minute, func() (done bool, err error) {
+		vol, _, err := client.Volume.Get(ctx, volumeId)
 		if err != nil {
-			return err
+			return false, err
 		}
 
-		err = event.Data.ToEntity(volume)
-		if err != nil {
-			return err
-		}
-
-		klog.Info("Received volume update ", logVolume(volume))
-	}
-
-	return nil
+		klog.V(2).Info("Volume ", vol.Id, " has status ", vol.Status.Key)
+		return vol.Status.Id != flow.VolumeStatusWorking, nil
+	})
 }
 
 func unsupportedControllerCapability(capability csi.ControllerServiceCapability_RPC_Type) error {

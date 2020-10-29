@@ -19,7 +19,7 @@ func (f Fields) String() string {
 	for key, val := range f {
 		fields = append(fields, fmt.Sprintf("%s=%v", key, val))
 	}
-	return strings.Join(fields, ", ")
+	return fmt.Sprintf("{%s}", strings.Join(fields, ", "))
 }
 
 func logVolume(volume *flow.Volume) Fields {
