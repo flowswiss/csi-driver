@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -413,7 +414,60 @@ func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, request *csi.Va
 }
 
 func (d *Driver) ListVolumes(ctx context.Context, request *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_LIST_VOLUMES)
+	klog.Info("Listing volumes ", Fields{
+		"starting_token": request.StartingToken,
+		"max_entries":    request.MaxEntries,
+	})
+
+	startingIndex := 0
+	if len(request.StartingToken) != 0 {
+		val, err := strconv.ParseInt(request.StartingToken, 10, 32)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid starting token: %s", request.StartingToken)
+		}
+
+		startingIndex = int(val)
+	}
+
+	volumes, _, err := d.flow.Volume.List(ctx, flow.PaginationOptions{NoFilter: 1})
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	klog.V(2).Info("Found a total of ", len(volumes), " volumes")
+
+	max := len(volumes)
+	if request.MaxEntries != 0 && int(request.MaxEntries) < max {
+		max = int(request.MaxEntries)
+	}
+
+	volumes = volumes[startingIndex:max]
+
+	res := &csi.ListVolumesResponse{}
+	for _, volume := range volumes {
+		volumeStatus := &csi.ListVolumesResponse_VolumeStatus{}
+		if volume.AttachedTo != nil {
+			volumeStatus.PublishedNodeIds = append(volumeStatus.PublishedNodeIds, volume.AttachedTo.Id.String())
+		}
+
+		res.Entries = append(res.Entries, &csi.ListVolumesResponse_Entry{
+			Status: volumeStatus,
+			Volume: &csi.Volume{
+				CapacityBytes: int64(volume.Size) * gib,
+				VolumeId:      volume.Id.String(),
+				AccessibleTopology: []*csi.Topology{
+					{
+						Segments: map[string]string{
+							"location": volume.Location.Id.String(),
+						},
+					},
+				},
+			},
+		})
+	}
+
+	klog.Info("Returning list volumes with ", len(res.Entries), " entries")
+	return res, nil
 }
 
 func (d *Driver) GetCapacity(ctx context.Context, request *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
@@ -421,7 +475,37 @@ func (d *Driver) GetCapacity(ctx context.Context, request *csi.GetCapacityReques
 }
 
 func (d *Driver) ControllerGetVolume(ctx context.Context, request *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_GET_VOLUME)
+	if len(request.VolumeId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
+	}
+
+	volumeId := flow.ParseIdentifier(request.VolumeId)
+	if !volumeId.Valid() {
+		return nil, status.Error(codes.InvalidArgument, "provided volume id is invalid")
+	}
+
+	volume, _, err := d.flow.Volume.Get(ctx, volumeId)
+	if err != nil {
+		if resp, ok := err.(*flow.ErrorResponse); ok && resp.Response.StatusCode == http.StatusNotFound {
+			return nil, status.Error(codes.NotFound, "volume does not exist")
+		}
+
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &csi.ControllerGetVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volume.Id.String(),
+			CapacityBytes: int64(volume.Size) * gib,
+			AccessibleTopology: []*csi.Topology{
+				{
+					Segments: map[string]string{
+						"location": volume.Location.Id.String(),
+					},
+				},
+			},
+		},
+	}, nil
 }
 
 func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
@@ -586,15 +670,95 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 }
 
 func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS)
+	klog.Info("Listing snapshots ", Fields{
+		"starting_token":   request.StartingToken,
+		"max_entries":      request.MaxEntries,
+		"source_volume_id": request.SourceVolumeId,
+		"snapshot_id":      request.SnapshotId,
+	})
+
+	startingIndex := 0
+	if len(request.StartingToken) != 0 {
+		val, err := strconv.ParseInt(request.StartingToken, 10, 32)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid starting token: %s", request.StartingToken)
+		}
+
+		startingIndex = int(val)
+	}
+
+	var filters []func(snapshot *flow.Snapshot) bool
+
+	if len(request.SnapshotId) != 0 {
+		filters = append(filters, func(snapshot *flow.Snapshot) bool {
+			return snapshot.Id.String() == request.SnapshotId
+		})
+	}
+
+	if len(request.SourceVolumeId) != 0 {
+		filters = append(filters, func(snapshot *flow.Snapshot) bool {
+			return snapshot.Volume.Id.String() == request.SourceVolumeId
+		})
+	}
+
+	snapshots, _, err := d.flow.Snapshot.List(ctx, flow.PaginationOptions{NoFilter: 1})
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	klog.V(2).Info("Found a total of ", len(snapshots), " snapshots")
+
+	res := &csi.ListSnapshotsResponse{}
+
+	for _, snapshot := range snapshots {
+		applicable := true
+		for _, filter := range filters {
+			if !filter(snapshot) {
+				applicable = false
+				break
+			}
+		}
+
+		if !applicable {
+			continue
+		}
+
+		timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+
+		res.Entries = append(res.Entries, &csi.ListSnapshotsResponse_Entry{
+			Snapshot: &csi.Snapshot{
+				SizeBytes:      int64(snapshot.Size) * gib,
+				SnapshotId:     snapshot.Id.String(),
+				SourceVolumeId: snapshot.Volume.Id.String(),
+				CreationTime:   timestamp,
+				ReadyToUse:     true,
+			},
+		})
+	}
+
+	max := len(res.Entries)
+	if request.MaxEntries != 0 && int(request.MaxEntries) < max {
+		max = int(request.MaxEntries)
+		res.NextToken = fmt.Sprintf("%d", max)
+	}
+
+	res.Entries = res.Entries[startingIndex:max]
+	klog.Info("Returning list of snapshots with ", len(res.Entries), " entries")
+	return res, nil
 }
 
 func (d *Driver) ControllerGetCapabilities(ctx context.Context, request *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	capabilityTypes := []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
+		csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
 	}
 
 	var capabilities []*csi.ControllerServiceCapability
