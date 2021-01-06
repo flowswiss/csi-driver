@@ -85,12 +85,12 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 
 	switch accessType := request.VolumeCapability.AccessType.(type) {
 	case *csi.VolumeCapability_Block:
-		err = d.mounter.Mount(device, request.StagingTargetPath, "", fs.MountOptionsBind)
+		err = d.mounter.Mount(device, request.StagingTargetPath, "", fs.MountOptionsBind|fs.MountOptionsBlock)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	case *csi.VolumeCapability_Mount:
-		err = d.mounter.Mount(device, request.StagingTargetPath, accessType.Mount.FsType, fs.MountOptionsBind)
+		err = d.mounter.FormatAndMount(device, request.StagingTargetPath, accessType.Mount.FsType, fs.MountOptionsDefault)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -164,14 +164,14 @@ func (d *Driver) NodePublishVolume(ctx context.Context, request *csi.NodePublish
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	switch accessType := request.VolumeCapability.AccessType.(type) {
+	switch request.VolumeCapability.AccessType.(type) {
 	case *csi.VolumeCapability_Block:
-		err := d.mounter.Mount(request.StagingTargetPath, request.TargetPath, "", fs.MountOptionsBind)
+		err := d.mounter.Mount(request.StagingTargetPath, request.TargetPath, "", fs.MountOptionsBind|fs.MountOptionsBlock)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	case *csi.VolumeCapability_Mount:
-		err := d.mounter.Mount(request.StagingTargetPath, request.TargetPath, accessType.Mount.FsType, fs.MountOptionsDefault)
+		err := d.mounter.Mount(request.StagingTargetPath, request.TargetPath, "", fs.MountOptionsBind)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
