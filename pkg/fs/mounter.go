@@ -28,8 +28,11 @@ func NewMounter() *Mounter {
 		Exec:      exec.New(),
 	}
 
+	resize := resizefs.NewResizeFs(base)
+
 	return &Mounter{
-		base: base,
+		base:   base,
+		resize: resize,
 	}
 }
 
