@@ -122,7 +122,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 		snapshotId := flow.ParseIdentifier(snapshotSource.SnapshotId)
 		if !snapshotId.Valid() {
-			return nil, status.Error(codes.InvalidArgument, "provided snapshot id is invalid")
+			return nil, status.Error(codes.NotFound, "selected snapshot does not exist")
 		}
 
 		snapshots, _, err := d.flow.Snapshot.List(ctx, flow.PaginationOptions{NoFilter: 1})
@@ -423,7 +423,7 @@ func (d *Driver) ListVolumes(ctx context.Context, request *csi.ListVolumesReques
 	if len(request.StartingToken) != 0 {
 		val, err := strconv.ParseInt(request.StartingToken, 10, 32)
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid starting token: %s", request.StartingToken)
+			return nil, status.Errorf(codes.Aborted, "invalid starting token: %s", request.StartingToken)
 		}
 
 		startingIndex = int(val)
@@ -594,6 +594,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 
 	for _, snapshot := range snapshots {
 		if snapshot.Name == request.Name {
+			if snapshot.Volume.Id != volumeId {
+				return nil, status.Error(codes.AlreadyExists, "snapshot already exists but with different source volume")
+			}
+
 			klog.Info("Found snapshot with matching requirements ", logSnapshot(snapshot))
 
 			timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
@@ -648,7 +652,9 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 
 	snapshotId := flow.ParseIdentifier(request.SnapshotId)
 	if !snapshotId.Valid() {
-		return nil, status.Error(codes.InvalidArgument, "provided snapshot id is invalid")
+		// assume snapshot is deleted
+		klog.Warning("Assuming snapshot is already deleted because it does not have a valid volume identifier: ", request.SnapshotId)
+		return &csi.DeleteSnapshotResponse{}, nil
 	}
 
 	klog.Info("Deleting snapshot", snapshotId)

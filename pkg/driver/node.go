@@ -220,6 +220,19 @@ func (d *Driver) NodeExpandVolume(ctx context.Context, request *csi.NodeExpandVo
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
 
+	if len(request.VolumePath) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "volume path must be provided")
+	}
+
+	mounted, err := d.mounter.IsMounted(request.VolumePath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	if !mounted {
+		return nil, status.Error(codes.NotFound, "volume is not mounted")
+	}
+
 	klog.Info("Resizing volume", request.VolumeId)
 
 	if request.VolumeCapability.GetBlock() != nil {
@@ -227,7 +240,7 @@ func (d *Driver) NodeExpandVolume(ctx context.Context, request *csi.NodeExpandVo
 		return &csi.NodeExpandVolumeResponse{}, nil
 	}
 
-	err := d.mounter.Resize(request.VolumePath)
+	err = d.mounter.Resize(request.VolumePath)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
