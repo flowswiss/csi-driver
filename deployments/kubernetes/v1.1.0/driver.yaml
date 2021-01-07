@@ -101,7 +101,7 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: csi-driver
-          image: registry.flow.swiss/k8s/csi-driver:beta
+          image: registry.flow.swiss/k8s/csi-driver:v1.1.0
           imagePullPolicy: Always
           args:
             - --base-url=$(FLOW_BASE_URL)
@@ -347,7 +347,7 @@ spec:
             - name: registration-dir
               mountPath: /registration
         - name: csi-driver
-          image: registry.flow.swiss/k8s/csi-driver:beta
+          image: registry.flow.swiss/k8s/csi-driver:v1.1.0
           imagePullPolicy: Always
           args:
             - --base-url=$(FLOW_BASE_URL)
