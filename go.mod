@@ -4,8 +4,9 @@ go 1.14
 
 require (
 	github.com/container-storage-interface/spec v1.3.0
-	github.com/flowswiss/goclient v1.0.0
+	github.com/flowswiss/goclient v0.0.0
 	github.com/golang/protobuf v1.4.2
+	golang.org/dl v0.0.0-20201014211523-4da6277e5455 // indirect
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
 	google.golang.org/grpc v1.31.1
 	k8s.io/apimachinery v0.19.2
