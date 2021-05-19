@@ -1,3 +1,4 @@
+---
 kind: pipeline
 type: kubernetes
 name: default
@@ -9,12 +10,11 @@ steps:
     username:
       from_secret: registry_user
     password:
-      from_secret: registry_pw
-    repo:
-      from_secret: registry_repo
-    registry:
-      from_secret: registry_base_url
+      from_secret: registry_password
+    repo: registry.flow.swiss/k8s/csi-driver
+    registry: registry.flow.swiss
     dockerfile: build/Dockerfile
+    mtu: 1450
     tags:
       - ${DRONE_TAG}
 
@@ -22,4 +22,9 @@ trigger:
   event:
   - tag
   ref:
-  - refs/tags/v*[1-9].*[0-9].*[0-9]-rc.*[0-9]
+  - refs/tags/*
+---
+kind: signature
+hmac: f7c6ef93dffeac201cb017e6447d3917a35e9dd19e6cb5453d3c20e6841e34a7
+
+...
