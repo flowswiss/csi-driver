@@ -11,6 +11,7 @@ COPY . .
 RUN go install ./...
 
 FROM alpine:3.12 as app
+RUN apk add --update e2fsprogs e2fsprogs-extra blkid util-linux
 COPY --from=builder /go/bin/csi-driver /bin/csi-driver
 
 ENTRYPOINT ["/bin/csi-driver"]
