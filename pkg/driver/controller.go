@@ -17,6 +17,8 @@ import (
 	"k8s.io/klog"
 
 	"github.com/flowswiss/goclient/flow"
+
+	"github.com/flowswiss/csi-driver/pkg/util"
 )
 
 const (
@@ -611,7 +613,7 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 					SnapshotId:     snapshot.Id.String(),
 					SourceVolumeId: snapshot.Volume.Id.String(),
 					CreationTime:   timestamp,
-					ReadyToUse:     true,
+					ReadyToUse:     util.MapSnapshotReadyToUse(snapshot),
 				},
 			}, nil
 		}
@@ -627,12 +629,52 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	klog.Info("Snapshot has been created")
+	klog.Info("Creating snapshot...waiting for completion")
+
+	// this backoff configuration should suffice for most cases,
+	// if we exceed the limit we return ReadyToUse false so k8s knows
+	// that it cannot create a volume from this snapshot
+	backoff := wait.Backoff{
+		Duration: 1 * time.Second,
+		Factor:   1.25,
+		Steps:    7,
+	}
+	err = wait.ExponentialBackoff(backoff, func() (done bool, err error) {
+		temp, _, err := d.flow.Snapshot.Get(ctx, snapshot.Id)
+		if err != nil {
+			// ignore the error and keep trying if the request fails
+			klog.Info(fmt.Sprintf("Failed to fetch snapshot status for snapshot with id %d", temp.Id))
+			return false, nil
+		}
+		available, err := temp.IsAvailable()
+		if err != nil {
+			klog.Info(fmt.Sprintf("Waiting for Snapshot with id %d to be available, currently in %s state", temp.Id, temp.Status.Key))
+			return false, err
+		}
+		return available, nil
+	})
 
 	timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	if err == wait.ErrWaitTimeout {
+		klog.Info("Timeout exceeded, snapshot is still creating. CSI Will respond with ReadyToUse set to false")
+		return &csi.CreateSnapshotResponse{
+			Snapshot: &csi.Snapshot{
+				SizeBytes:      int64(snapshot.Size) * gib,
+				SnapshotId:     snapshot.Id.String(),
+				SourceVolumeId: snapshot.Volume.Id.String(),
+				CreationTime:   timestamp,
+				ReadyToUse:     false,
+			},
+		}, nil
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	klog.Info("Snapshot has been created")
 
 	return &csi.CreateSnapshotResponse{
 		Snapshot: &csi.Snapshot{
@@ -740,7 +782,7 @@ func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRe
 				SnapshotId:     snapshot.Id.String(),
 				SourceVolumeId: snapshot.Volume.Id.String(),
 				CreationTime:   timestamp,
-				ReadyToUse:     true,
+				ReadyToUse:     util.MapSnapshotReadyToUse(snapshot),
 			},
 		})
 	}
