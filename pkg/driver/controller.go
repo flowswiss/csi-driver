@@ -655,8 +655,8 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 		return true, nil
 	})
 
-	timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
-	if err != nil {
+	timestamp, creationTimeStampErr := ptypes.TimestampProto(snapshot.CreatedAt.Time())
+	if creationTimeStampErr != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
