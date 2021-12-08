@@ -601,6 +601,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 
 			klog.Info("Found snapshot with matching requirements ", logSnapshot(snapshot))
 
+			// the csi-snapshotter doesn't back off when ReadyToUse is set to false
+			// so we wait to prevent it from spamming the API when the snapshot is in a non-ready state
+			time.Sleep(5 * time.Second)
+
 			timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
 			if err != nil {
 				return nil, status.Error(codes.Internal, err.Error())
