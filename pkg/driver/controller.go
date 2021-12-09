@@ -69,9 +69,10 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	sizeInGib := int(math.Ceil(float64(size) / float64(gib)))
 
 	klog.Info("Creating volume ", Fields{
-		"name":         request.Name,
-		"size":         sizeInGib,
-		"capabilities": request.VolumeCapabilities,
+		"name":           request.Name,
+		"size":           sizeInGib,
+		"capabilities":   request.VolumeCapabilities,
+		"content_source": request.VolumeContentSource,
 	})
 
 	volumes, _, err := d.flow.Volume.List(ctx, flow.PaginationOptions{NoFilter: 1})
@@ -116,6 +117,9 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		Size:       sizeInGib,
 		LocationId: d.clusterLocationId,
 	}
+	
+	klog.Info(request.VolumeContentSource)
+	klog.Info(request.GetVolumeContentSource())
 
 	if request.VolumeContentSource != nil && request.VolumeContentSource.GetSnapshot() != nil {
 		snapshotSource := request.VolumeContentSource.GetSnapshot()
