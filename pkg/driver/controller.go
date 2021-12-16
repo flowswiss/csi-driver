@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 
@@ -605,17 +605,12 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 			// so we wait to prevent it from spamming the API when the snapshot is in a non-ready state
 			time.Sleep(5 * time.Second)
 
-			timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
-			if err != nil {
-				return nil, status.Error(codes.Internal, err.Error())
-			}
-
 			return &csi.CreateSnapshotResponse{
 				Snapshot: &csi.Snapshot{
 					SizeBytes:      int64(snapshot.Size) * gib,
 					SnapshotId:     snapshot.Id.String(),
 					SourceVolumeId: snapshot.Volume.Id.String(),
-					CreationTime:   timestamp,
+					CreationTime:   timestamppb.New(snapshot.CreatedAt.Time()),
 					ReadyToUse:     snapshot.IsAvailable(),
 				},
 			}, nil
@@ -659,8 +654,7 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 		return true, nil
 	})
 
-	timestamp, creationTimeStampErr := ptypes.TimestampProto(snapshot.CreatedAt.Time())
-	if creationTimeStampErr != nil {
+	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -671,7 +665,7 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 				SizeBytes:      int64(snapshot.Size) * gib,
 				SnapshotId:     snapshot.Id.String(),
 				SourceVolumeId: snapshot.Volume.Id.String(),
-				CreationTime:   timestamp,
+				CreationTime:   timestamppb.New(snapshot.CreatedAt.Time()),
 				ReadyToUse:     false,
 			},
 		}, nil
@@ -686,7 +680,7 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 			SizeBytes:      int64(snapshot.Size) * gib,
 			SnapshotId:     snapshot.Id.String(),
 			SourceVolumeId: snapshot.Volume.Id.String(),
-			CreationTime:   timestamp,
+			CreationTime:   timestamppb.New(snapshot.CreatedAt.Time()),
 			ReadyToUse:     true,
 		},
 	}, nil
@@ -776,17 +770,12 @@ func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRe
 			continue
 		}
 
-		timestamp, err := ptypes.TimestampProto(snapshot.CreatedAt.Time())
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-
 		res.Entries = append(res.Entries, &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SizeBytes:      int64(snapshot.Size) * gib,
 				SnapshotId:     snapshot.Id.String(),
 				SourceVolumeId: snapshot.Volume.Id.String(),
-				CreationTime:   timestamp,
+				CreationTime:   timestamppb.New(snapshot.CreatedAt.Time()),
 				ReadyToUse:     snapshot.IsAvailable(),
 			},
 		})
