@@ -21,8 +21,9 @@ func (c *HealthChecker) Check(ctx context.Context) error {
 	group := errgroup.Group{}
 
 	for _, check := range c.checks {
+		tmp := check
 		group.Go(func() error {
-			return check.Check(ctx)
+			return tmp.Check(ctx)
 		})
 	}
 

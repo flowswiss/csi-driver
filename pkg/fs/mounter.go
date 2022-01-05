@@ -5,9 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/kubernetes/pkg/util/resizefs"
+	mount "k8s.io/mount-utils"
 	"k8s.io/utils/exec"
-	"k8s.io/utils/mount"
 )
 
 type MountOptions int
@@ -20,7 +19,7 @@ const (
 
 type Mounter struct {
 	base   *mount.SafeFormatAndMount
-	resize *resizefs.ResizeFs
+	resize *mount.ResizeFs
 }
 
 func NewMounter() *Mounter {
@@ -29,11 +28,9 @@ func NewMounter() *Mounter {
 		Exec:      exec.New(),
 	}
 
-	resize := resizefs.NewResizeFs(base)
-
 	return &Mounter{
 		base:   base,
-		resize: resize,
+		resize: mount.NewResizeFs(base.Exec),
 	}
 }
 
