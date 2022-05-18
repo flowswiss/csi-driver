@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/sys/unix"
 	mount "k8s.io/mount-utils"
 	"k8s.io/utils/exec"
 )
@@ -16,6 +17,11 @@ const (
 	MountOptionsBind
 	MountOptionsBlock
 )
+
+type VolumeStatistics struct {
+	AvailableBytes, TotalBytes, UsedBytes    int64
+	AvailableInodes, TotalInodes, UsedInodes int64
+}
 
 type Mounter struct {
 	base   *mount.SafeFormatAndMount
@@ -151,4 +157,26 @@ func (m *Mounter) createTarget(target string, opts MountOptions) error {
 	}
 
 	return nil
+}
+
+func (m *Mounter) GetStatistics(path string) (VolumeStatistics, error) {
+	var statfs unix.Statfs_t
+
+	// see http://man7.org/linux/man-pages/man2/statfs.2.html for details.
+	err := unix.Statfs(path, &statfs)
+	if err != nil {
+		return VolumeStatistics{}, err
+	}
+
+	volStats := VolumeStatistics{
+		AvailableBytes: int64(statfs.Bavail) * int64(statfs.Bsize),
+		TotalBytes:     int64(statfs.Blocks) * int64(statfs.Bsize),
+		UsedBytes:      (int64(statfs.Blocks) - int64(statfs.Bfree)) * int64(statfs.Bsize),
+
+		AvailableInodes: int64(statfs.Ffree),
+		TotalInodes:     int64(statfs.Files),
+		UsedInodes:      int64(statfs.Files) - int64(statfs.Ffree),
+	}
+
+	return volStats, nil
 }

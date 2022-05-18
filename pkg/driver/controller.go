@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/flowswiss/goclient/compute"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -31,7 +32,10 @@ const (
 	maxVolumeSize = 5 * tib
 )
 
-func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+func (d *Driver) CreateVolume(
+	ctx context.Context,
+	request *csi.CreateVolumeRequest,
+) (*csi.CreateVolumeResponse, error) {
 	if len(request.Name) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "name must be provided")
 	}
@@ -187,7 +191,10 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	return res, nil
 }
 
-func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+func (d *Driver) DeleteVolume(
+	ctx context.Context,
+	request *csi.DeleteVolumeRequest,
+) (*csi.DeleteVolumeResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -236,7 +243,10 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+func (d *Driver) ControllerPublishVolume(
+	ctx context.Context,
+	request *csi.ControllerPublishVolumeRequest,
+) (*csi.ControllerPublishVolumeResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -309,7 +319,10 @@ func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.Contr
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
 
-func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+func (d *Driver) ControllerUnpublishVolume(
+	ctx context.Context,
+	request *csi.ControllerUnpublishVolumeRequest,
+) (*csi.ControllerUnpublishVolumeResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -373,7 +386,10 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.Con
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 
-func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, request *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+func (d *Driver) ValidateVolumeCapabilities(
+	ctx context.Context,
+	request *csi.ValidateVolumeCapabilitiesRequest,
+) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -475,7 +491,10 @@ func (d *Driver) GetCapacity(ctx context.Context, request *csi.GetCapacityReques
 	return nil, unsupportedControllerCapability(csi.ControllerServiceCapability_RPC_GET_CAPACITY)
 }
 
-func (d *Driver) ControllerGetVolume(ctx context.Context, request *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
+func (d *Driver) ControllerGetVolume(
+	ctx context.Context,
+	request *csi.ControllerGetVolumeRequest,
+) (*csi.ControllerGetVolumeResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -509,7 +528,10 @@ func (d *Driver) ControllerGetVolume(ctx context.Context, request *csi.Controlle
 	}, nil
 }
 
-func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
+func (d *Driver) ControllerExpandVolume(
+	ctx context.Context,
+	request *csi.ControllerExpandVolumeRequest,
+) (*csi.ControllerExpandVolumeResponse, error) {
 	if len(request.VolumeId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "volume id must be provided")
 	}
@@ -535,7 +557,10 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}
 
 	if volume.AttachedTo != nil {
-		return nil, status.Error(codes.FailedPrecondition, "volume is still attached to server")
+		attachedToStatusID := int(volume.AttachedTo.Status.Id)
+		if attachedToStatusID != compute.ServerStatusStopped && attachedToStatusID != compute.ServerStatusRunning {
+			return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("volume is attached to server with invalid '%s' status for resize", volume.AttachedTo.Name))
+		}
 	}
 
 	klog.Info("Expanding volume ", Fields{
@@ -569,7 +594,10 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}, nil
 }
 
-func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+func (d *Driver) CreateSnapshot(
+	ctx context.Context,
+	request *csi.CreateSnapshotRequest,
+) (*csi.CreateSnapshotResponse, error) {
 	if len(request.Name) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "name must be provided")
 	}
@@ -686,7 +714,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 	}, nil
 }
 
-func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+func (d *Driver) DeleteSnapshot(
+	ctx context.Context,
+	request *csi.DeleteSnapshotRequest,
+) (*csi.DeleteSnapshotResponse, error) {
 	if len(request.SnapshotId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "snapshot id must be provided")
 	}
@@ -716,7 +747,10 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 
-func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+func (d *Driver) ListSnapshots(
+	ctx context.Context,
+	request *csi.ListSnapshotsRequest,
+) (*csi.ListSnapshotsResponse, error) {
 	klog.Info("Listing snapshots ", Fields{
 		"starting_token":   request.StartingToken,
 		"max_entries":      request.MaxEntries,
@@ -792,7 +826,10 @@ func (d *Driver) ListSnapshots(ctx context.Context, request *csi.ListSnapshotsRe
 	return res, nil
 }
 
-func (d *Driver) ControllerGetCapabilities(ctx context.Context, request *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+func (d *Driver) ControllerGetCapabilities(
+	ctx context.Context,
+	request *csi.ControllerGetCapabilitiesRequest,
+) (*csi.ControllerGetCapabilitiesResponse, error) {
 	capabilityTypes := []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
