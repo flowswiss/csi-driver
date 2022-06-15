@@ -559,7 +559,7 @@ func (d *Driver) ControllerExpandVolume(
 	if volume.AttachedTo != nil {
 		attachedToStatusID := int(volume.AttachedTo.Status.Id)
 		if attachedToStatusID != compute.ServerStatusStopped && attachedToStatusID != compute.ServerStatusRunning {
-			return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("volume is attached to server with invalid '%s' status for resize", volume.AttachedTo.Name))
+			return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("volume is attached to server '%s' with invalid status '%s' for resize", volume.AttachedTo.Name, volume.Status.Name))
 		}
 	}
 
