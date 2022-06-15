@@ -838,6 +838,7 @@ func (d *Driver) ControllerGetCapabilities(
 		csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES,
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 		csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
+		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 	}
 
 	var capabilities []*csi.ControllerServiceCapability
