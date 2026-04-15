@@ -336,7 +336,7 @@ func (d *Driver) NodeGetInfo(ctx context.Context, request *csi.NodeGetInfoReques
 
 func findDeviceBySerial(serial string) (string, error) {
 	var bestMatch string
-	regex := regexp.MustCompile("QEMU_HARDDISK_([0-9a-f\\-]+)")
+	regex := regexp.MustCompile("(?:QEMU_HARDDISK[-_]|virtio-)([0-9a-f][-0-9a-f]*)")
 
 	err := filepath.Walk("/dev/disk/by-id", func(path string, info os.FileInfo, err error) error {
 		matches := regex.FindStringSubmatch(path)
